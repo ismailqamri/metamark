@@ -1,24 +1,43 @@
-# Amazon Scraper Backend 🛒
+# Legal Metrology Compliance Backend 🛒⚖️
 
-A Flask-based backend application that intelligently scrapes Amazon product data, categorizes products using Google's Gemini AI, and tracks seller-customer interactions to generate activity heatmaps.
+A Flask-based backend that intelligently scrapes Amazon product data, categorizes
+products using Google's Gemini AI, runs **Legal Metrology compliance analysis**
+(OCR + rule checks) on the product, and tracks seller–customer interactions to
+generate activity heatmaps. It powers both a Next.js dashboard and a Chrome
+extension overlay.
+
+> **Canonical entry point:** `server.py`. Older prototypes (`app.py`, `main.py`,
+> `tempCodeRunnerFile.py`) and the unused `rag_compliance.py` module have been
+> moved to [`_archive/`](./_archive) — do not run them.
+
+---
 
 ## 📋 Features
 
-* **AI-Powered Routing:** Uses Google Gemini to analyze URLs and route them to category-specific scrapers (Books, Electronics, Food, Skincare).
-* **Intelligent Scraping:** Custom scrapers for different product types to extract specific metadata.
-* **Seller Analytics:** Tracks customer scraping activity to generate geospatial heatmaps for sellers.
-* **Media Storage:** Downloads and stores product images directly in the database as BLOBs.
+* **AI-Powered Routing:** Google Gemini analyzes each URL and routes it to a
+  category-specific scraper (Books, Electronics, Food, Skincare, or a generic
+  fallback).
+* **Hardened Scraping:** A single shared fetcher (`amazon_scraper/fetcher.py`)
+  handles user-agent rotation, cookie priming, ret/backoff, bot-wall detection,
+  and an optional headless-browser fallback so scraping keeps working when
+  Amazon serves CAPTCHAs or 503s.
+* **Compliance Analysis:** OCR + rule-based checks produce a compliance score,
+  grade, and violation summary for each product.
+* **Seller Analytics:** Tracks customer scraping activity to generate geospatial
+  heatmaps for sellers.
+* **Media Storage:** Downloads and stores product images directly in the
+  database as BLOBs.
 * **Role-Based Access:** Distinct workflows for `customer` and `seller` accounts.
 
 ---
 
 ## 🛠 Prerequisites
 
-Before you begin, ensure you have the following installed:
-
 * **Python:** 3.8+
 * **Database:** MySQL 8.0+
-* **Cloud API:** Google Cloud Platform account with **Generative AI API** enabled.
+* **Cloud API:** Google Cloud account with the **Generative AI API** enabled.
+* **(Optional) Headless browser:** Chrome/Chromium + a driver (or
+  `undetected-chromedriver`) if you want the Selenium fallback for tough pages.
 
 ---
 
@@ -30,8 +49,6 @@ pip install -r requirements.txt
 ```
 
 ### 2. Database Setup
-Log in to your MySQL instance and execute the schema file.
-
 ```bash
 # Login to MySQL
 mysql -u root -p
@@ -39,203 +56,189 @@ mysql -u root -p
 # Run the schema file
 source database_schema.sql
 ```
-*Note: Ensure you increase the `max_allowed_packet` in MySQL configuration to handle image BLOBs (see Troubleshooting).*
+*Note: increase `max_allowed_packet` in MySQL to handle image BLOBs (see Troubleshooting).*
 
-### 3. Configure Application
-Open `app.py` and update the configuration sections:
+### 3. Configure Environment (`.env`)
+Configuration is read from environment variables — **do not hardcode secrets in
+the source**. Copy `.env.example` to `.env` and fill in your values:
 
-```python
-# MySQL Configuration
-DB_CONFIG = {
-    'host': 'localhost',
-    'user': 'your_mysql_username',
-    'password': 'your_mysql_password',
-    'database': 'amazon_scraper_db'
-}
+```bash
+cp .env.example .env
+```
 
-# Google API Key (for Gemini AI)
-GOOGLE_API_KEY = 'your_gcp_api_key_here'
+```ini
+# Flask
+FLASK_SECRET_KEY=change-me-to-a-long-random-string
+
+# MySQL
+DB_HOST=localhost
+DB_USER=your_mysql_username
+DB_PASSWORD=your_mysql_password
+DB_NAME=amazon_scraper_db
+
+# Google Gemini
+GOOGLE_API_KEY=your_gcp_api_key_here
+
+# Scraper tuning (all optional — sensible defaults apply)
+# SCRAPER_PROXY=http://user:pass@host:port
+# SCRAPER_MAX_ATTEMPTS=4
+# SCRAPER_TIMEOUT=25
+# SCRAPER_BROWSER_FALLBACK=1
+# SCRAPER_MIN_DELAY=0.5
+# SCRAPER_MAX_DELAY=1.5
 ```
 
 ### 4. Run the Application
 ```bash
-python app.py
+python server.py
 ```
-The server will start at `http://localhost:5000`.
+The server starts at `http://localhost:5000`. CORS is pre-configured for the
+frontend at `http://localhost:3000` with credentials (session cookies) enabled.
 
 ---
 
 ## 📂 Project Structure
 
 ```text
-project/
+legal_metrology/
 │
-├── app.py              # Main Flask application & API routes
-├── amazon.py           # Default/Generic scraper
-├── book.py             # Book-specific scraper
-├── electric.py         # Electronics scraper
-├── food.py             # Food products scraper
-├── skincare.py         # Skincare products scraper
-├── database_schema.sql # MySQL database schema
-├── requirements.txt    # Python dependencies
-└── README.md           # Documentation
+├── server.py               # ★ Canonical Flask app & all API routes
+├── amazon_scraper/
+│   ├── fetcher.py          # ★ Shared hardened HTTP fetcher (anti-bot, retries, browser fallback)
+│   ├── amazon.py           # Default/generic product scraper
+│   ├── book.py             # Book-specific scraper
+│   ├── electric.py         # Electronics scraper
+│   ├── food.py             # Food products scraper
+│   ├── skincare.py         # Skincare products scraper
+│   └── search.py           # Search-results link extractor
+├── compliance.py           # Compliance analysis (used by /api/compliance/analyze)
+├── compliance_copy.py      # Compliance analysis (used by /api/scrape auto-analyze & /validate)
+├── comply.py               # Compliance helpers
+├── chatbot_compliance.py   # Chatbot compliance assistant
+├── database_schema.sql     # MySQL database schema
+├── requirements.txt        # Python dependencies
+├── .env.example            # Template for required environment variables
+├── _archive/               # Deprecated/duplicate files kept for reference
+└── README.md               # This file
 ```
 
 ---
 
 ## 📡 API Endpoints
 
+### System
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/health` | Health probe (server + DB status). Used by the extension. |
+
 ### Authentication
+| Method | Endpoint | Payload |
+| :--- | :--- | :--- |
+| `POST` | `/api/signup` | `{"username","password","role"}` |
+| `POST` | `/api/login` | `{"username","password"}` |
+| `POST` | `/api/logout` | N/A |
 
-| Method | Endpoint | Description | Payload Example |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/signup` | Register new user | `{"username": "user", "password": "pw", "role": "seller"}` |
-| `POST` | `/api/login` | Login user | `{"username": "user", "password": "pw"}` |
-| `POST` | `/api/logout` | Logout user | N/A |
+### Scraping & Compliance
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/api/scrape` | Scrape a product (auto-runs compliance by default). |
+| `POST` | `/api/products/validate/<product_id>` | Run/re-run compliance for a product; returns score, grade, passed/total checks. |
+| `POST` | `/api/compliance/analyze/<product_id>` | Full compliance report for a product. |
+| `POST` | `/api/compliance/batch` | Batch compliance analysis. |
+| `POST` | `/api/seller/check-upload` | Pre-upload check (multipart images + info). |
+| `POST` | `/api/seller/check-upload-text` | Pre-upload check (text only). |
+| `POST` | `/api/chat` | Compliance chatbot. |
+| `POST` | `/extract-links` | Extract top product links from a search URL. |
 
-### Product Scraping
+### Data & Analytics
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/dashboard` | Dashboard summary. |
+| `GET` | `/api/products` | List products. |
+| `GET` | `/api/products/detailed` | List products with details. |
+| `GET` | `/api/product/<product_id>` | Single product detail. |
+| `GET` | `/api/image/<image_id>` | Fetch a stored image BLOB. |
+| `GET` | `/api/seller/activity` | Who scraped the seller's products. |
+| `GET` | `/api/heatmap` | Seller-scoped heatmap data. |
+| `GET` | `/api/global-heatmap` | Global heatmap data. |
 
-**POST** `/api/scrape`
-Scrapes a product. If a **Customer** scrapes a product owned by a **Seller**, a heatmap entry is generated.
+### Rewards (MT tokens / gifts)
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/api/gifts` | Create a gift. |
+| `POST` | `/api/gifts/redeem` | Redeem a gift. |
+| `GET` | `/api/gifts/list` | List gifts. |
+| `GET` | `/api/gifts/my-redemptions` | Current user's redemptions. |
+| `POST` | `/api/gifts/add-tokens` | Add MT tokens. |
+| `GET` | `/api/gifts/token-balance` | Current token balance. |
 
-**Payload:**
+**Scrape payload example:**
 ```json
-{
-  "url": "[https://www.amazon.com/dp/B07G5829G9](https://www.amazon.com/dp/B07G5829G9)"
-}
-```
-
-**Response:**
-```json
-{
-  "message": "Product scraped and stored successfully",
-  "product_id": 123,
-  "asin": "B07G5829G9",
-  "title": "Product Title",
-  "images_stored": 5,
-  "is_update": false
-}
-```
-
-### Seller Analytics
-
-**GET** `/api/seller/activity`
-Returns a log of who is scraping the seller's products.
-
-**GET** `/api/seller/heatmap`
-Returns aggregated location data for scraping activities.
-
-**Response:**
-```json
-{
-  "heatmap_data": [
-    {
-      "location": "Mumbai, Maharashtra, India",
-      "latitude": 19.0760,
-      "longitude": 72.8777,
-      "scrape_count": 15,
-      "last_scrape": "2024-01-15T14:30:00"
-    }
-  ],
-  "total_locations": 1,
-  "total_scrapes": 15
-}
+{ "url": "https://www.amazon.in/dp/B07G5829G9", "auto_analyze": true }
 ```
 
 ---
 
 ## 🔄 How It Works
 
-### 1. The Scraping Pipeline
-1.  **Submission:** User submits an Amazon URL.
-2.  **AI Analysis:** The **AI Router** sends the URL to Google Gemini to determine the category (Book, Food, Skincare, Electric, or Default).
-3.  **Extraction:** The appropriate Python scraper script is executed.
-4.  **Storage:**
-    * **If ASIN exists:** Update product details.
-    * **If New:** Create new entry (Current user becomes the **Owner/Seller**).
-    * Images are downloaded and stored as BLOBs.
+1. **Submission:** User submits an Amazon URL (dashboard or extension overlay).
+2. **AI Analysis:** The AI Router asks Gemini for the product category.
+3. **Fetch:** The shared `fetcher` retrieves the page — rotating user agents,
+   priming cookies, retrying with backoff, and falling back to a headless
+   browser if Amazon shows a bot wall.
+4. **Extraction:** The category scraper parses the HTML with BeautifulSoup.
+5. **Storage:** Product is upserted by ASIN; images are stored as BLOBs.
+6. **Compliance:** OCR + rule checks produce a score, grade, and violations.
+7. **Analytics:** Customer-on-seller scrapes are logged for heatmaps.
 
-### 2. Heatmap & Activity Logic
-The system tracks interest based on User Roles:
-
-* **Customer scrapes Seller's Product:**
-    * **Log:** Created in `SellerActivity`.
-    * **Data:** Seller ID (Owner), Customer ID (Scraper), Location (via IP).
-    * **Result:** Appears on Seller's Heatmap.
-* **Seller scrapes Own Product:**
-    * **Log:** Created with `customer_id: NULL`.
-    * **Result:** Administrative log, does not affect heatmap intensity.
-* **Seller scrapes Other Seller's Product:**
-    * Treated as a customer scrape (Competitor tracking).
+### Heatmap & Activity Logic
+* **Customer scrapes Seller's product:** logged with seller + customer + location; appears on the seller's heatmap.
+* **Seller scrapes own product:** logged with `customer_id: NULL`; administrative only.
+* **Seller scrapes another seller's product:** treated as a competitor scrape.
 
 ---
 
-## 🗄️ Database Schema
+## 🧭 Scraping Reliability
 
-* **Users:** Stores credentials and roles (`customer` vs `seller`).
-* **Products:** Stores ASIN, metadata, and the `user_id` of the seller who first added it.
-* **Images:** Stores image binaries (`LONGBLOB`) linked to products.
-* **SellerActivity:** Connects Sellers, Customers, and Locations (Lat/Long) to track product interest.
+The old scrapers advertised a stale Chrome/91 user agent, always requested
+Brotli even without a decoder, and had no anti-bot handling — so Amazon returned
+CAPTCHA/503 pages and scraping failed. All scrapers now share
+`amazon_scraper/fetcher.py`, which:
 
----
+* rotates among modern browser user agents (with matching Client-Hint headers),
+* advertises Brotli **only** when a decoder is installed,
+* primes cookies on the Amazon homepage before hitting product pages,
+* detects bot walls / CAPTCHAs and retries with exponential backoff + jitter,
+* optionally falls back to a headless browser (`SCRAPER_BROWSER_FALLBACK=1`).
 
-## 📊 Testing Guide
-
-You can test the full flow using `curl` commands.
-
-**1. Create Accounts**
-```bash
-# Create Seller
-curl -X POST http://localhost:5000/api/signup -H "Content-Type: application/json" -d '{"username":"seller1","password":"123","role":"seller"}'
-
-# Create Customer
-curl -X POST http://localhost:5000/api/signup -H "Content-Type: application/json" -d '{"username":"cust1","password":"123","role":"customer"}'
-```
-
-**2. Seller Adds Product**
-```bash
-# Login Seller
-curl -X POST http://localhost:5000/api/login -H "Content-Type: application/json" -d '{"username":"seller1","password":"123"}' -c seller_cookies.txt
-
-# Scrape (Seller becomes owner)
-curl -X POST http://localhost:5000/api/scrape -H "Content-Type: application/json" -b seller_cookies.txt -d '{"url":"[https://www.amazon.com/dp/B07G5829G9](https://www.amazon.com/dp/B07G5829G9)"}'
-```
-
-**3. Customer Generates Heatmap Data**
-```bash
-# Login Customer
-curl -X POST http://localhost:5000/api/login -H "Content-Type: application/json" -d '{"username":"cust1","password":"123"}' -c cust_cookies.txt
-
-# Scrape same product
-curl -X POST http://localhost:5000/api/scrape -H "Content-Type: application/json" -b cust_cookies.txt -d '{"url":"[https://www.amazon.com/dp/B07G5829G9](https://www.amazon.com/dp/B07G5829G9)"}'
-```
+Tune behavior via the `SCRAPER_*` environment variables listed above. For heavy
+usage, set `SCRAPER_PROXY` to route requests through a rotating proxy.
 
 ---
 
 ## 🐛 Troubleshooting
 
-* **Image Storage Fails:**
-    MySQL default packet size is often too small for images. Run this in MySQL:
-    ```sql
-    SET GLOBAL max_allowed_packet=67108864; -- Sets limit to 64MB
-    ```
-* **Location Tracking Issues:**
-    The system uses `ipapi.co` (Free tier: 1000 req/day). Localhost (`127.0.0.1`) will not generate a location. Test with a deployed version or mock the IP.
-* **AI Router Fails:**
-    Ensure your Google Cloud Project has the **Generative AI API** enabled and quotas are not exceeded.
+* **Scraping returns nothing / 500:** Amazon may be blocking you. Install
+  `brotli` and (optionally) `selenium` + a Chrome driver, then set
+  `SCRAPER_BROWSER_FALLBACK=1`. Consider a proxy via `SCRAPER_PROXY`.
+* **Image Storage Fails:** `SET GLOBAL max_allowed_packet=67108864;` (64MB) in MySQL.
+* **Sessions not persisting:** ensure `FLASK_SECRET_KEY` is set in `.env`.
+* **Location Tracking:** uses `ipapi.co` (free tier). Localhost won't geolocate.
+* **AI Router Fails:** ensure the Generative AI API is enabled and `GOOGLE_API_KEY` is valid.
 
 ---
 
 ## 📈 Future Roadmap
 
-* [ ] JWT Authentication implementation.
-* [ ] Rate Limiting and Proxy rotation for scraping.
-* [ ] Redis caching for frequent product lookups.
-* [ ] Docker containerization.
-* [ ] Swagger API Documentation.
+* [ ] JWT Authentication
+* [ ] Built-in rate limiting & proxy rotation
+* [ ] Redis caching for frequent lookups
+* [ ] Docker containerization
+* [ ] Swagger/OpenAPI documentation
+* [ ] Consolidate the compliance modules (`compliance*.py`, `comply.py`) into one package
 
 ---
 
 ## 📝 License
 
-MIT License - Feel free to use for your projects!
+MIT License — feel free to use for your projects!

@@ -190,12 +190,12 @@ def scrape_page():
                                 st.metric("Grade", compliance_data.get('grade', 'N/A'))
                             with col3:
                                 is_compliant = compliance_data.get('is_compliant', False)
-                                st.metric("Status", "✅ Compliant" if is_compliant else "⚠️ Issues Found")
+                                st.metric("Status", "✅ Compliant" if is_compliant else "WARNING:️ Issues Found")
                             with col4:
                                 st.metric("Violations", compliance_data.get('violations_count', 0))
 
                             if compliance_data.get('requires_action'):
-                                st.warning("⚠️ This product requires attention. View details in My Products.")
+                                st.warning("WARNING:️ This product requires attention. View details in My Products.")
 
                     elif response:
                         st.error(f"❌ {response.json().get('error', 'Scraping failed')}")
@@ -304,12 +304,12 @@ def product_detail_page(product_id):
                 st.metric("Grade", compliance_report.get('compliance_grade', 'N/A'))
             with col3:
                 is_compliant = compliance_report.get('is_compliant', False)
-                st.metric("Status", "✅ Compliant" if is_compliant else "⚠️ Needs Review")
+                st.metric("Status", "✅ Compliant" if is_compliant else "WARNING:️ Needs Review")
 
             # Violation Summary
             violations = compliance_report.get('violation_summary', {})
             if violations:
-                with st.expander("⚠️ Violation Summary", expanded=True):
+                with st.expander("WARNING:️ Violation Summary", expanded=True):
                     col1, col2, col3 = st.columns(3)
                     with col1:
                         st.metric("Critical", violations.get('critical', 0))
@@ -379,7 +379,7 @@ def product_detail_page(product_id):
                         st.write(seller)
 
             if json_data.get('important_information'):
-                with st.expander("⚠️ Important Information"):
+                with st.expander("WARNING:️ Important Information"):
                     st.write(json_data['important_information'])
 
         # Re-analyze button
@@ -492,7 +492,7 @@ def seller_upload_check_page():
 
                         # Issues
                         if feedback.get('issues'):
-                            with st.expander("⚠️ Issues to Fix", expanded=True):
+                            with st.expander("WARNING:️ Issues to Fix", expanded=True):
                                 for issue in feedback['issues']:
                                     severity_icon = {"critical": "🔴", "major": "🟠", "minor": "🟡"}.get(issue.get('severity', ''), "ℹ️")
                                     st.markdown(f"{severity_icon} {issue.get('description', '')}")

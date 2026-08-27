@@ -11,14 +11,14 @@
 
 ## 📌 Overview
 
-**MetaMark** is an **AI-driven, hardware-assisted compliance verification system** designed to automatically validate **Legal Metrology declarations on e-commerce platforms**.
+**MetaMark** is an **AI-driven compliance verification system** designed to automatically validate **Legal Metrology declarations on e-commerce platforms**.
 
-The platform combines **Vision AI, Large Language Model (LLM) reasoning, cloud-native microservices, and IoT-based physical verification hardware** to detect misleading packaging, incorrect declarations, and regulatory violations **before products are published on marketplaces**.
+The platform combines **Vision AI, Large Language Model (LLM) reasoning, and cloud-native microservices** to detect misleading packaging, incorrect declarations, and regulatory violations **before products are published on marketplaces**.
 
 > 🏛️ **Problem Statement ID:** SIH25057
 > 🏢 **Ministry:** Consumer Affairs, Food & Public Distribution
 > 🧠 **Theme:** Miscellaneous
-> ⚙️ **Category:** Hardware
+> ⚙️ **Category:** Software
 
 ---
 
@@ -32,7 +32,7 @@ E-commerce platforms face persistent challenges such as:
 * Lack of real-time, audit-ready compliance visibility
 * Limited physical verification of listed products
 
-**MetaMark addresses these challenges by automating compliance enforcement using AI-based reasoning and sensor-driven physical validation.**
+**MetaMark addresses these challenges by automating compliance enforcement using AI-based reasoning.**
 
 ---
 
@@ -44,7 +44,6 @@ MetaMark delivers an **end-to-end automated compliance pipeline** that provides:
 * AI-driven validation against Legal Metrology rules
 * Confidence-weighted compliance scoring
 * Auto-generated violation explanations and remediation steps
-* Hardware-assisted physical verification of product attributes
 * Transparent, audit-ready compliance reports
 
 ---
@@ -179,30 +178,7 @@ Dashboard, Reports & Heatmaps
 
 ---
 
-## 🧪 Hardware Innovation (Key Differentiator)
 
-MetaMark uniquely integrates **sensor-based physical verification** with AI-driven digital compliance.
-
-### 🔩 Hardware Components
-
-| Module            | Purpose                                     |
-| ----------------- | ------------------------------------------- |
-| TOF Sensor        | Measures real-world package dimensions      |
-| Load Cell + HX711 | Accurate weight verification                |
-| UV + IR Scanner   | Detects fake labels, overwrites & tampering |
-| ESP32 + BLE       | Low-power wireless communication            |
-
----
-
-### 📦 Hardware Capabilities
-
-* Detects **under-filled or adulterated products**
-* Identifies **fake holograms, expiry reprints, and MRP tampering**
-* Verifies **declared vs actual weight and volume**
-* Portable, **mobile-mountable modular architecture**
-* Low-cost, scalable, and manufacturable design
-
----
 
 ## 🖼️ Screenshots & Prototype
 
@@ -216,11 +192,7 @@ MetaMark uniquely integrates **sensor-based physical verification** with AI-driv
 ![Demo 2](docs/screenshots/demo2.png)
 ![Demo 3](docs/screenshots/demo3.png)
 
-### 🔹 Hardware Prototype (Sensor-Based Verification)
 
-![Hardware Prototype](docs/screenshots/hardwaredemo.jpeg)
-
----
 
 ## 🪙 Meta-Token Reward System (User Incentive & Engagement)
 

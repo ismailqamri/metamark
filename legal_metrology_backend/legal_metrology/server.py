@@ -107,10 +107,10 @@ def ai_router(url: str) -> dict:
             print(f"[AI ROUTER] Invalid category '{category}', using default 'amazon'")
             category = 'amazon'
         else:
-            print(f"[AI ROUTER] ✓ Detected category: {category}")
+            print(f"[AI ROUTER] SUCCESS: Detected category: {category}")
         
     except Exception as e:
-        print(f"[AI ROUTER] ⚠ AI analysis failed: {e}")
+        print(f"[AI ROUTER] WARNING: AI analysis failed: {e}")
         print(f"[AI ROUTER] Using URL-based heuristics as fallback...")
         
         # Fallback: Simple URL/keyword analysis
@@ -317,6 +317,34 @@ def log_seller_own_activity(product_data: dict, seller_id: int, action: str, sel
     finally:
         cursor.close()
         connection.close()
+
+
+# ==================== HEALTH CHECK ====================
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Lightweight health probe used by the browser extension.
+
+    Returns 200 as long as the Flask process is up. Also reports database
+    connectivity (non-fatal) and whether the current session is logged in,
+    which is handy for debugging the extension connection.
+    """
+    db_ok = False
+    try:
+        conn = get_db_connection()
+        if conn is not None:
+            db_ok = conn.is_connected()
+            conn.close()
+    except Exception as e:
+        print(f"[HEALTH] DB check failed: {e}")
+
+    return jsonify({
+        'status': 'ok',
+        'service': 'metamark-backend',
+        'database': 'connected' if db_ok else 'unavailable',
+        'logged_in': bool(session.get('logged_in')),
+        'timestamp': datetime.utcnow().isoformat() + 'Z'
+    }), 200
 
 
 # ==================== AUTHENTICATION ENDPOINTS ====================
@@ -761,6 +789,52 @@ def analyze_product_compliance(product_id):
     except Exception as e:
         print(f"[ERROR] Compliance analysis failed: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/products/validate/<int:product_id>', methods=['POST'])
+def validate_product(product_id):
+    """
+    Run (or re-run) compliance validation for a product and return a result
+    shaped for the browser-extension overlay.
+
+    The extension calls this as a fallback when /api/scrape did not already
+    include a `compliance_analysis` block. The response fields
+    (compliance_score, final_grade, passed_checks, total_checks) mirror what
+    the extension builds inline from the scrape response, so both code paths
+    render identically. We use `compliance_copy.analyze_compliance` here to
+    match the auto-analyze path in /api/scrape.
+    """
+    if not session.get('logged_in'):
+        return jsonify({'error': 'Authentication required'}), 401
+
+    print(f"[API] Product validation requested for product {product_id}")
+
+    try:
+        report = compliance_copy.analyze_compliance(product_id)
+
+        if not report or 'error' in report:
+            return jsonify({
+                'error': (report or {}).get('error', 'Validation failed'),
+                'product_id': product_id
+            }), 500
+
+        total_checks = 10
+        violations_total = report.get('violation_summary', {}).get('total', 0)
+        passed_checks = max(0, total_checks - violations_total)
+
+        return jsonify({
+            'product_id': product_id,
+            'compliance_score': report.get('compliance_score', 0),
+            'final_grade': report.get('compliance_grade', 'N/A'),
+            'passed_checks': passed_checks,
+            'total_checks': total_checks,
+            'is_compliant': report.get('is_compliant', False),
+            'requires_action': report.get('requires_action', False),
+            'report': report
+        }), 200
+
+    except Exception as e:
+        print(f"[ERROR] Product validation failed: {e}")
+        return jsonify({'error': str(e), 'product_id': product_id}), 500
 
 @app.route('/api/seller/check-upload', methods=['POST'])
 def check_seller_upload():

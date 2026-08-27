@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 # generalized_amazon_scraper.py
 
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 import json
 import re
@@ -11,6 +8,13 @@ from urllib.parse import urlparse
 from typing import Optional, Dict, Any, List
 import google.generativeai as genai
 import os
+
+# Shared hardened page fetcher (UA rotation, cookie priming, retries,
+# bot-wall detection, and an optional headless-browser fallback).
+try:
+    from amazon_scraper.fetcher import get_fetcher
+except ImportError:  # allow running this file directly from amazon_scraper/
+    from fetcher import get_fetcher
 
 
 
@@ -52,14 +56,8 @@ class AmazonScraper:
     def __init__(self, headers: Dict[str, str] = None, timeout: int = 15):
         self.headers = headers or DEFAULT_HEADERS
         self.timeout = timeout
-        self.session = requests.Session()
-        
-        # Robust retry strategy
-        retries = Retry(total=3, backoff_factor=0.6,
-                        status_forcelist=[429, 500, 502, 503, 504],
-                        allowed_methods=["GET", "HEAD"])
-        self.session.mount('https://', HTTPAdapter(max_retries=retries))
-        self.session.mount('http://', HTTPAdapter(max_retries=retries))
+        # All HTTP fetching is delegated to the shared, hardened fetcher.
+        self.fetcher = get_fetcher()
 
     def extract_asin(self, url: str, soup: Optional[BeautifulSoup] = None) -> Optional[str]:
         """Extracts ASIN from URL or Page."""
@@ -520,9 +518,11 @@ class AmazonScraper:
         """Aggregates all data points into a clean JSON structure."""
         print(f"[INFO] Scraping: {url}")
         try:
-            r = self.session.get(url, headers=self.headers, timeout=self.timeout)
-            r.raise_for_status()
-            soup = BeautifulSoup(r.content, 'html.parser')
+            html = self.fetcher.fetch(url)
+            if not html:
+                print(f"[ERROR] Could not retrieve page (blocked or unreachable): {url}")
+                return None
+            soup = BeautifulSoup(html, 'html.parser')
 
             price_data = self._get_price_data(soup)
 

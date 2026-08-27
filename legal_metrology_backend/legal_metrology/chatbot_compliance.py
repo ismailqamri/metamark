@@ -12,10 +12,11 @@ import mysql.connector
 from mysql.connector import Error
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.agents import create_sql_agent, AgentType
-from langchain.sql_database import SQLDatabase
-from langchain.agents.agent_toolkits import SQLDatabaseToolkit
-from langchain.prompts import ChatPromptTemplate
+
+from langchain_community.agent_toolkits import create_sql_agent
+from langchain_community.utilities import SQLDatabase
+from langchain_community.agent_toolkits import SQLDatabaseToolkit
+from langchain_core.prompts import ChatPromptTemplate
 
 
 from dotenv import load_dotenv
@@ -369,7 +370,7 @@ Remember: You're a personalized assistant for User ID {user_id} ONLY!"""
         agent = create_sql_agent(
             llm=llm,
             toolkit=toolkit,
-            agent_type=AgentType.OPENAI_FUNCTIONS,
+            agent_type="openai-functions",
             verbose=True,
             handle_parsing_errors=True,
             max_iterations=5,
@@ -434,7 +435,7 @@ Remember: Only show data for User ID {user_id}. Always filter with WHERE user_id
         
         response_text = result.get('output', 'I apologize, but I encountered an issue processing your request.')
         
-        print(f"[USER CHATBOT] ✓ Response generated ({len(response_text)} chars)")
+        print(f"[USER CHATBOT] SUCCESS: Response generated ({len(response_text)} chars)")
         
         return {
             'response': response_text,

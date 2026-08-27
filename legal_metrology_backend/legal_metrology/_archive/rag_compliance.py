@@ -14,14 +14,14 @@ import numpy as np
 # Vector store and embeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.docstore.document import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
 from langchain.chains import RetrievalQA
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-from langchain._api.deprecation import LangChainDeprecationWarning
+from langchain_core._api.deprecation import LangChainDeprecationWarning
 warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
 
 from dotenv import load_dotenv
@@ -327,7 +327,7 @@ class LegalMetrologyRAG:
                     embeddings,
                     allow_dangerous_deserialization=True
                 )
-                print("[RAG] ✓ Vector store loaded")
+                print("[RAG] SUCCESS: Vector store loaded")
             else:
                 print("[RAG] Creating new vector store from knowledge base...")
                 self._create_vector_store()
@@ -373,7 +373,7 @@ class LegalMetrologyRAG:
             # Save vector store
             os.makedirs(os.path.dirname(VECTOR_STORE_PATH), exist_ok=True)
             self.vector_store.save_local(VECTOR_STORE_PATH)
-            print(f"[RAG] ✓ Vector store saved to {VECTOR_STORE_PATH}")
+            print(f"[RAG] SUCCESS: Vector store saved to {VECTOR_STORE_PATH}")
             
         except Exception as e:
             print(f"[ERROR] Failed to create vector store: {e}")
@@ -383,7 +383,7 @@ class LegalMetrologyRAG:
         """Create QA chain with retriever"""
         try:
             from langchain.chains import RetrievalQA
-            from langchain.prompts import PromptTemplate
+            from langchain_core.prompts import PromptTemplate
             
             prompt_template = """You are an expert on Indian Legal Metrology (Packaged Commodities) Rules, 2011.
 
@@ -412,7 +412,7 @@ Accurate Answer based on Legal Metrology Rules:"""
                 chain_type_kwargs={"prompt": PROMPT}
             )
             
-            print("[RAG] ✓ QA chain created")
+            print("[RAG] SUCCESS: QA chain created")
             
         except Exception as e:
             print(f"[ERROR] Failed to create QA chain: {e}")
@@ -687,4 +687,4 @@ if __name__ == '__main__':
         print(f"Confidence: {result['confidence']}")
         print(f"Sources: {len(result['sources'])}")
     
-    print("\n[RAG SYSTEM] ✓ Ready")
+    print("\n[RAG SYSTEM] SUCCESS: Ready")

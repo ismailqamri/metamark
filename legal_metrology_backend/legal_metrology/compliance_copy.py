@@ -15,11 +15,12 @@ from mysql.connector import Error
 
 # LangChain imports
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.agents import create_sql_agent, AgentType
-from langchain.sql_database import SQLDatabase
-from langchain.agents.agent_toolkits import SQLDatabaseToolkit
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.schema import HumanMessage, SystemMessage
+
+from langchain_community.agent_toolkits import create_sql_agent
+from langchain_community.utilities import SQLDatabase
+from langchain_community.agent_toolkits import SQLDatabaseToolkit
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.messages import AIMessage
 
 # Google AI imports
@@ -28,7 +29,7 @@ from dotenv import load_dotenv
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-from langchain._api.deprecation import LangChainDeprecationWarning
+from langchain_core._api.deprecation import LangChainDeprecationWarning
 warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
 
 LOG_BUFFER = []
@@ -395,7 +396,7 @@ MRP STATUS MUST BE DETERMINED AS FOLLOWS:
      * "Price: Rs."
      * "Maximum Retail Price: [blank]"
 
-⚠️ Status = "partial" is NOT ALLOWED for MRP
+WARNING:️ Status = "partial" is NOT ALLOWED for MRP
    - For MRP, use ONLY "present" or "missing"
    - If you can see some digits but not all (e.g., "₹4__" where __ is unclear), mark as "missing"
 
@@ -538,7 +539,7 @@ Return STRICT JSON format (no markdown, no code blocks):
                 "confidence_score": 0.3
             }
         
-        log(f"[OCR] ✓ Extracted {len(ocr_results.get('extracted_text', ''))} characters")
+        log(f"[OCR] SUCCESS: Extracted {len(ocr_results.get('extracted_text', ''))} characters")
         log(f"[OCR] Found {len(ocr_results.get('findings', []))} compliance items")
         
         return {
@@ -693,9 +694,9 @@ SEARCH STRATEGIES:
 - For Dimensions: Look for "size", "dimensions", measurements
 
 EXAMPLES:
-✓ "Country of origin > text: China" → Country of Origin: status="present", value="China", adequacy="adequate"
-✓ "MRP > text: ₹499" → MRP: status="present", value="₹499", adequacy="adequate"
-✓ "Net Quantity > text: 250 gm" → Net Quantity: status="present", value="250 gm", adequacy="adequate"
+SUCCESS: "Country of origin > text: China" → Country of Origin: status="present", value="China", adequacy="adequate"
+SUCCESS: "MRP > text: ₹499" → MRP: status="present", value="₹499", adequacy="adequate"
+SUCCESS: "Net Quantity > text: 250 gm" → Net Quantity: status="present", value="250 gm", adequacy="adequate"
 
 For each requirement:
 1. SEARCH EVERYWHERE in the data dump for related information
@@ -759,7 +760,7 @@ Return ONLY valid JSON (no markdown, no explanations):
             log(f"  • {f.get('requirement', 'Unknown')}: status={status}, adequacy={adequacy}")
             log(f"   └─ value='{value[:60]}...' from: {found_in[:50]}")
         
-        log(f"[DATA ANALYSIS] ✓ Complete. Quality Score: {analysis_results.get('data_quality_score', 0.5)}")
+        log(f"[DATA ANALYSIS] SUCCESS: Complete. Quality Score: {analysis_results.get('data_quality_score', 0.5)}")
         
         return analysis_results
     
@@ -1161,7 +1162,7 @@ def calculate_compliance_score(
     low_violations = [v for v in violations if v["severity"] == "low"]
     
     log(
-        f"[SCORING] ✓ Final Score: {total_score:.1f}/100 | Grade: {grade}. "
+        f"[SCORING] SUCCESS: Final Score: {total_score:.1f}/100 | Grade: {grade}. "
         f"High: {len(high_violations)}, Low: {len(low_violations)}"
     )
     
@@ -1200,7 +1201,7 @@ def generate_recommendations(violations: List[Dict], ocr_results: Dict, data_ana
     
     # High priority partial - IMPORTANT
     if high_partial:
-        recommendations.append("\n⚠️ IMPORTANT IMPROVEMENTS (High Priority):")
+        recommendations.append("\nWARNING:️ IMPORTANT IMPROVEMENTS (High Priority):")
         for v in high_partial:
             recommendations.append(f"  • Complete/Clarify: {v.get('requirement', 'Unknown')}")
     
@@ -1222,7 +1223,7 @@ def generate_recommendations(violations: List[Dict], ocr_results: Dict, data_ana
         recommendations.append("  • Upload clear photos of product labels")
         recommendations.append("  • Include front, back, and side label images")
     
-    return recommendations if recommendations else ["✓ Product meets basic compliance requirements"]
+    return recommendations if recommendations else ["SUCCESS: Product meets basic compliance requirements"]
 
 # ==================== MAIN COMPLIANCE ANALYSIS FUNCTION ====================
 def analyze_compliance(product_id: int) -> Dict[str, Any]:
@@ -1444,7 +1445,7 @@ def analyze_compliance(product_id: int) -> Dict[str, Any]:
 #             'estimated_approval_chance': 'High' if scoring['score'] >= 85 else 'Medium' if scoring['score'] >= 70 else 'Low'
 #         }
         
-#         print(f"[SELLER TEXT UPLOAD] ✓ Score: {scoring['score']}/100 | Grade: {scoring['grade']}")
+#         print(f"[SELLER TEXT UPLOAD] SUCCESS: Score: {scoring['score']}/100 | Grade: {scoring['grade']}")
 #         print(f"[SELLER TEXT UPLOAD] Ready for upload: {feedback_report['ready_for_upload']}")
         
 #         return feedback_report
@@ -1638,7 +1639,7 @@ For mismatches, populate "critical_mismatches" array with detailed explanations.
             log(f"[VALIDATION] Raw response: {response_text[:500]}")
             return _get_empty_validation_result()
         
-        log(f"[VALIDATION] ✓ Successfully validated declarations")
+        log(f"[VALIDATION] SUCCESS: Successfully validated declarations")
         
         # Add normalized comparisons
         validation_result = _add_normalized_comparisons(validation_result)
@@ -1951,7 +1952,7 @@ def analyze_seller_upload_text(
             'estimated_approval_chance': 'High' if scoring['score'] >= 85 else 'Medium' if scoring['score'] >= 70 else 'Low'
         }
         
-        print(f"[SELLER TEXT UPLOAD] ✓ Score: {scoring['score']}/100 | Grade: {scoring['grade']}")
+        print(f"[SELLER TEXT UPLOAD] SUCCESS: Score: {scoring['score']}/100 | Grade: {scoring['grade']}")
         print(f"[SELLER TEXT UPLOAD] Ready for upload: {feedback_report['ready_for_upload']}")
         
         return feedback_report
@@ -2010,7 +2011,7 @@ When querying:
         agent = create_sql_agent(
             llm=llm,
             toolkit=toolkit,
-            agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            agent_type="zero-shot-react-description",
             verbose=True,
             handle_parsing_errors=True,
             max_iterations=5,
@@ -2069,7 +2070,7 @@ def chatbot_agent(user_message: str, conversation_history: List[Dict] = None) ->
         result = _db_agent.invoke({"input": user_message})
         response_text = result.get('output', 'I apologize, but I encountered an issue processing your request.')
         
-        print(f"[CHATBOT] ✓ Response generated ({len(response_text)} chars)")
+        print(f"[CHATBOT] SUCCESS: Response generated ({len(response_text)} chars)")
         return response_text
     
     except Exception as e:
@@ -2117,7 +2118,7 @@ def batch_analyze_products(product_ids: List[int]) -> Dict[str, Any]:
         summary['average_score'] /= summary['analyzed']
         summary['average_score'] = round(summary['average_score'], 1)
     
-    print(f"[BATCH] ✓ Complete. Analyzed: {summary['analyzed']}, Failed: {summary['failed']}")
+    print(f"[BATCH] SUCCESS: Complete. Analyzed: {summary['analyzed']}, Failed: {summary['failed']}")
     
     return {
         'summary': summary,

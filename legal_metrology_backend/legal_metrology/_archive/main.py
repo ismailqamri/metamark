@@ -4,7 +4,8 @@ Flask Backend for Amazon Product Scraper
 Integrates AI Router, MySQL Database, Multiple Scrapers, and AI Compliance Module
 """
 
-from flask import Flask, request, jsonify, session
+from flask import Flask, request, jsonify, session, send_file, abort
+import io
 from flask_cors import CORS
 import mysql.connector
 from mysql.connector import Error
@@ -15,6 +16,7 @@ import requests
 from datetime import datetime
 import json
 import google.generativeai as genai
+import compliance_copy
 
 from dotenv import load_dotenv
 
@@ -24,11 +26,18 @@ import amazon_scraper.book as book
 import amazon_scraper.electric as electric
 import amazon_scraper.food as food
 import amazon_scraper.skincare as skincare
+import amazon_scraper.search as search
 import chatbot_compliance
+import comply as comply
 
 # Import AI Compliance Module
 import compliance
 from datetime import timedelta
+
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+from langchain_core._api.deprecation import LangChainDeprecationWarning
+warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
@@ -103,10 +112,10 @@ def ai_router(url: str) -> dict:
             print(f"[AI ROUTER] Invalid category '{category}', using default 'amazon'")
             category = 'amazon'
         else:
-            print(f"[AI ROUTER] ✓ Detected category: {category}")
+            print(f"[AI ROUTER] SUCCESS: Detected category: {category}")
         
     except Exception as e:
-        print(f"[AI ROUTER] ⚠ AI analysis failed: {e}")
+        print(f"[AI ROUTER] WARNING: AI analysis failed: {e}")
         print(f"[AI ROUTER] Using URL-based heuristics as fallback...")
         
         # Fallback: Simple URL/keyword analysis
@@ -152,8 +161,13 @@ def hash_password(password: str) -> str:
 
 def extract_asin_from_url(url: str) -> str:
     """Extract ASIN from Amazon URL"""
-    match = re.search(r'/(?:dp|gp/product)/([A-Z0-9]{9,13})', url)
-    return match.group(1) if match else None
+    # Matches /dp/ASIN, /gp/product/ASIN, /gp/aw/d/ASIN
+    match = re.search(r'/(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{10})', url, re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+    # Fallback for plain ASIN pasted or other formats
+    match = re.search(r'([B0-9][A-Z0-9]{9})', url, re.IGNORECASE)
+    return match.group(1).upper() if match else None
 
 def download_image(image_url: str) -> bytes:
     """Download image and return as bytes"""
@@ -419,10 +433,90 @@ def logout():
 
 # ==================== SCRAPING ENDPOINT ====================
 
+from flask import request, jsonify, session
+import json
+import base64
+from mysql.connector import Error
+
+def detect_scraper_category(product_data: dict) -> str:
+    """Heuristic detection of scraper/category from returned keys."""
+    if not isinstance(product_data, dict):
+        return "unknown"
+    keys = set(product_data.keys())
+    # Book scrapers often have 'about_author' or 'ISBN' inside product_details
+    if "about_author" in keys or any("ISBN" in k for k in (product_data.get("product_details") or {})):
+        return "book"
+    # Food scrapers often have nutrition/ingredients/important_info/product_metadata
+    if "nutrition_info" in keys or "important_info" in keys or "product_metadata" in keys:
+        return "food"
+    # Skincare / beauty often provide 'important_info' and 'product_metadata' too,
+    # but may include 'Safety Information' in important_info.
+    if "important_info" in keys and ("Ingredients" in (product_data.get("important_info") or {} ) or "Safety Information" in (product_data.get("important_info") or {})):
+        return "skincare"
+    # Electronics / general produce 'technical_details' or 'additional_info'
+    if "technical_details" in keys or "additional_info" in keys or "specifications" in keys:
+        return "electronics"
+    # Fallback: if `feature_bullets` present => general/grocery/retail
+    if "feature_bullets" in keys:
+        return "general"
+    return "unknown"
+
+def normalize_scraper_output(data: dict) -> dict:
+    """
+    Normalize different scraper outputs into a consistent DB schema.
+    Keep fields that are common and also copy scraper-specific blocks under names.
+    """
+    if not isinstance(data, dict):
+        return {}
+
+    # canonical top-level fields (first-class)
+    normalized = {
+        "url": data.get("url"),
+        "asin": data.get("asin"),
+        "title": data.get("title"),
+        "price": data.get("price"),
+        "currency": data.get("currency"),
+        "country": data.get("country"),
+        "language": data.get("language"),
+        "rating": data.get("rating"),
+        "reviews_count": data.get("reviews_count"),
+        "availability": data.get("availability"),
+        "shipping_details": data.get("shipping_details") or data.get("shipping") or None,
+        "detected_category": data.get("detected_category") or detect_scraper_category(data),
+        # Primary descriptive buckets (fallbacks in order)
+        "description": data.get("description") or data.get("about_product") or None,
+        "feature_bullets": data.get("feature_bullets") or data.get("highlights") or [],
+        "about_author": data.get("about_author") or None,
+        # specs/tech/product details (merge sensible sources)
+        "product_details": data.get("product_details") or data.get("product_metadata") or data.get("product_information") or {},
+        "specifications": data.get("specifications") or data.get("technical_details") or {},
+        "important_information": data.get("important_information") or data.get("important_info") or {},
+        # food/skincare specific
+        "ingredients": data.get("ingredients") or (data.get("important_info") or {}).get("Ingredients") or None,
+        "nutrition_info": data.get("nutrition_info") or (data.get("important_info") or {}).get("Nutrition") or None,
+        # seller block preserved
+        "seller_information": data.get("seller"),
+        # any other captured raw buckets kept for debugging / QA
+        "extra": {}
+    }
+
+    # Preserve common named extras that appear per-scraper
+    for key in ("additional_info", "product_metadata", "important_info", "technical_details", "about_author", "product_json"):
+        if key in data and data[key] is not None:
+            normalized["extra"][key] = data[key]
+
+    # Images: many scrapers use 'images' but some use 'image_urls' or 'img' — fallback chain
+    imgs = data.get("images") or data.get("image_urls") or data.get("image_list") or []
+    # ensure list
+    if isinstance(imgs, str):
+        imgs = [imgs]
+    normalized["images"] = imgs
+
+    return normalized
+
 @app.route('/api/scrape', methods=['POST'])
 def scrape_product():
     """Main scraping endpoint with database integration + AUTO compliance analysis + selleractivity logging"""
-
     # ---------------------------------------------------
     # AUTH CHECK
     # ---------------------------------------------------
@@ -432,7 +526,7 @@ def scrape_product():
     user_id = session.get('user_id')
     user_role = session.get('role')
 
-    data = request.json
+    data = request.json or {}
     url = data.get('url')
     auto_analyze = data.get('auto_analyze', True)
 
@@ -440,7 +534,7 @@ def scrape_product():
         return jsonify({'error': 'URL is required'}), 400
 
     # ---------------------------------------------------
-    # EXTRACT ASIN
+    # EXTRACT ASIN (use your existing func)
     # ---------------------------------------------------
     asin = extract_asin_from_url(url)
     if not asin:
@@ -448,7 +542,7 @@ def scrape_product():
 
     # Get customer IP address
     customer_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-    if ',' in customer_ip:
+    if customer_ip and ',' in customer_ip:
         customer_ip = customer_ip.split(',')[0].strip()
 
     print(f"[SCRAPE] User {user_id} ({user_role}) scraping ASIN: {asin} from IP: {customer_ip}")
@@ -457,9 +551,14 @@ def scrape_product():
     # STEP 1 — AI ROUTER SCRAPER
     # ---------------------------------------------------
     product_data = ai_router(url)
-
     if not product_data:
         return jsonify({'error': 'Failed to scrape product'}), 500
+
+    # Normalize and also keep raw
+    normalized = normalize_scraper_output(product_data)
+    # Ensure detected_category is set from heuristics if not present
+    if not normalized.get("detected_category"):
+        normalized["detected_category"] = detect_scraper_category(product_data)
 
     # ---------------------------------------------------
     # STEP 2 — DB CONNECTION
@@ -469,82 +568,61 @@ def scrape_product():
         return jsonify({'error': 'Database connection failed'}), 500
 
     cursor = connection.cursor(dictionary=True)
-
     try:
-        # ---------------------------------------------------
-        # CHECK IF PRODUCT EXISTS
-        # ---------------------------------------------------
         cursor.execute("SELECT product_id, user_id AS seller_id FROM Products WHERE asin = %s", (asin,))
         existing_product = cursor.fetchone()
 
-        # Core fields
-        title = product_data.get('title')
-        price = product_data.get('price')
-        currency = product_data.get('currency')
-        country = product_data.get('country')
-        language = product_data.get('language')
+        # core landing fields (use normalized where possible)
+        title = normalized.get('title')
+        price = normalized.get('price')
+        currency = normalized.get('currency')
+        country = normalized.get('country')
+        language = normalized.get('language')
 
-        # Build product JSON
-        json_data = {
-            'description': product_data.get('description'),
-            'feature_bullets': product_data.get('feature_bullets'),
-            'about_author': product_data.get('about_author'),
-            'product_details': product_data.get('product_details'),
-            'specifications': product_data.get('specifications'),
-            'technical_details': product_data.get('technical_details'),
-            'important_information': product_data.get('important_information'),
-            'availability': product_data.get('availability'),
-            'shipping_details': product_data.get('shipping_details'),
-            'detected_category': product_data.get('detected_category'),
-            'rating': product_data.get('rating'),
-            'reviews_count': product_data.get('reviews_count'),
-            'seller_information': product_data.get('seller')
-        }
+        # Build JSON blobs:
+        # - product_json_raw: store original scraper output unmodified (for QA)
+        # - product_json: standardized format used by UI/consumers
+        product_json_raw = product_data
+        product_json = normalized
 
         seller_id = None
 
-        # ---------------------------------------------------
-        # INSERT OR UPDATE PRODUCT
-        # ---------------------------------------------------
         if existing_product:
-            # UPDATE
             product_id = existing_product['product_id']
             seller_id = existing_product['seller_id']
-
             print(f"[UPDATE] Updating product {product_id} (seller: {seller_id})")
 
             update_query = """
                 UPDATE Products
                 SET url=%s, title=%s, price=%s, currency=%s, country=%s,
-                    language=%s, seller_information=%s, product_json=%s
+                    language=%s, seller_information=%s, product_json=%s, product_json_raw=%s
                 WHERE product_id=%s
             """
             cursor.execute(update_query, (
                 url, title, price, currency, country, language,
-                json.dumps(product_data.get('seller')),
-                json.dumps(json_data),
+                json.dumps(normalized.get('seller_information') or product_data.get('seller')),
+                json.dumps(product_json),
+                json.dumps(product_json_raw),
                 product_id
             ))
 
-            # Delete old images
+            # delete existing images to replace with new ones
             cursor.execute("DELETE FROM Images WHERE product_id = %s", (product_id,))
             print(f"[DELETE] Old images removed for {product_id}")
 
         else:
-            # INSERT NEW PRODUCT
             print(f"[INSERT] Creating new product entry")
-
             insert_query = """
                 INSERT INTO Products 
-                (user_id, url, asin, title, price, currency, country, language, seller_information, product_json)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (user_id, url, asin, title, price, currency, country, language, seller_information, product_json, product_json_raw)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             cursor.execute(insert_query, (
                 user_id, url, asin, title, price, currency, country, language,
-                json.dumps(product_data.get('seller')),
-                json.dumps(json_data)
+                json.dumps(normalized.get('seller_information') or product_data.get('seller')),
+                json.dumps(product_json),
+                json.dumps(product_json_raw)
             ))
-
             product_id = cursor.lastrowid
             seller_id = user_id  # first scraper becomes owner
 
@@ -553,8 +631,8 @@ def scrape_product():
         # ---------------------------------------------------
         # STEP 3 — STORE IMAGES AS BLOBS
         # ---------------------------------------------------
-        images = product_data.get('images', [])
-        print(f"[IMAGES] Found {len(images)} images")
+        images = normalized.get('images') or []
+        print(f"[IMAGES] Found {len(images)} images (keys tried: images/image_urls/image_list)")
 
         images_inserted = 0
         for img_url in images[:10]:
@@ -574,23 +652,18 @@ def scrape_product():
         # ---------------------------------------------------
         from datetime import datetime
         ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-
         action = f"{user_role.capitalize()} scraped product ASIN {asin}"
         seller_info_json = json.dumps(product_data.get('seller'))
 
-        # Determine seller_id & customer_id for logging
         if user_role == "customer":
             sa_seller_id = None
             sa_customer_id = user_id
-
         elif user_role == "seller" and seller_id == user_id:
             sa_seller_id = user_id
             sa_customer_id = None
-
         elif user_role == "seller" and seller_id and seller_id != user_id:
             sa_seller_id = seller_id
             sa_customer_id = user_id
-
         else:
             sa_seller_id = None
             sa_customer_id = None
@@ -601,12 +674,10 @@ def scrape_product():
              location, latitude, longitude, timestamp, created_at)
             VALUES (%s, %s, %s, %s, NULL, NULL, NULL, %s, %s)
         """
-
         cursor.execute(
             seller_activity_query,
             (sa_seller_id, sa_customer_id, action, seller_info_json, ts, ts)
         )
-
         connection.commit()
         print(f"[SELLER-ACTIVITY] Logged: {action}")
 
@@ -617,28 +688,25 @@ def scrape_product():
         if auto_analyze:
             print(f"[AUTO-ANALYZE] Running compliance...")
             try:
-                compliance_report = compliance.analyze_compliance(product_id)
+                compliance_report = compliance_copy.analyze_compliance(product_id)
             except Exception as e:
                 print(f"[AUTO-ANALYZE] FAILED: {e}")
 
         # ---------------------------------------------------
         # STEP 6 — RETRIEVE STORED IMAGES AS BASE64
         # ---------------------------------------------------
-        import base64
-        
         cursor.execute(
             "SELECT image_id, image_data FROM Images WHERE product_id = %s ORDER BY image_id",
             (product_id,)
         )
         image_rows = cursor.fetchall()
-        
         image_blobs = []
         for row in image_rows:
             image_blobs.append({
                 'image_id': row['image_id'],
                 'image_data': base64.b64encode(row['image_data']).decode('utf-8')
             })
-        
+
         print(f"[RETRIEVE] Retrieved {len(image_blobs)} images from database")
 
         cursor.close()
@@ -653,10 +721,14 @@ def scrape_product():
             'asin': asin,
             'title': title,
             'images_stored': images_inserted,
-            'images': image_blobs,  # ← NEW: Return all image blobs
+            'images': image_blobs,
             'is_update': existing_product is not None,
             'seller_id': seller_id,
-            'seller_info': product_data.get('seller')
+            'seller_info': product_data.get('seller'),
+            'price': price,
+            'product_json': product_json,         # standardized
+            'product_json_raw': product_json_raw,
+            'compliance_report': compliance_report  # raw for QA
         }
 
         if compliance_report and 'error' not in compliance_report:
@@ -673,7 +745,7 @@ def scrape_product():
     except Error as e:
         connection.rollback()
         print(f"[DB ERROR] {e}")
-        return jsonify({'error': f'Database error: {str(e)}'}),500
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
 
 # ==================== AI COMPLIANCE ENDPOINTS (NEW!) ====================
 
@@ -688,7 +760,7 @@ def analyze_product_compliance(product_id):
     print(f"[API] Compliance analysis requested for product {product_id}")
     
     try:
-        compliance_report = compliance.analyze_compliance(product_id)
+        compliance_report = compliance_copy.analyze_compliance(product_id)
         
         if 'error' in compliance_report:
             return jsonify({'error': compliance_report['error']}), 500
@@ -740,7 +812,7 @@ def check_seller_upload():
     print(f"[SELLER CHECK] Analyzing upload with {len(image_blobs)} images")
     
     try:
-        feedback_report = compliance.analyze_seller_upload(image_blobs, product_data, category)
+        feedback_report = comply.analyze_seller_upload(image_blobs, product_data, category)
         
         if 'error' in feedback_report:
             return jsonify({'error': feedback_report['error']}), 500
@@ -753,6 +825,65 @@ def check_seller_upload():
     except Exception as e:
         print(f"[ERROR] Seller upload check failed: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/seller/check-upload-text', methods=['POST'])
+def check_seller_upload_text():
+    """
+    Analyze seller's product using raw text description from speech-to-text
+    Accepts multipart form data with images, text description, actual weight, and actual dimensions
+    """
+    # Get category
+    category = request.form.get('category', 'amazon')
+    
+    # Get raw text description (from speech-to-text)
+    raw_text = request.form.get('description', '').strip()
+    
+    # Get seller-declared actual weight and dimensions
+    actual_weight = request.form.get('actual_weight', '').strip()  # e.g., "250g" or "1.5kg"
+    actual_dimensions = request.form.get('actual_dimensions', '').strip()  # e.g., "15x10x5 cm"
+    
+    if not raw_text:
+        return jsonify({'error': 'Product description is required'}), 400
+    
+    # Get uploaded images
+    image_files = request.files.getlist('images')
+    image_blobs = []
+    
+    for img_file in image_files[:10]:  # Limit to 10 images
+        try:
+            image_blobs.append(img_file.read())
+        except Exception as e:
+            print(f"[WARNING] Failed to read image: {e}")
+    
+    if not image_blobs:
+        return jsonify({'error': 'At least one image is required'}), 400
+    
+    print(f"[SELLER TEXT CHECK] Analyzing upload with {len(image_blobs)} images and text description ({len(raw_text)} chars)")
+    print(f"[SELLER TEXT CHECK] Declared weight: {actual_weight}, Declared dimensions: {actual_dimensions}")
+    
+    try:
+        feedback_report = compliance_copy.analyze_seller_upload_text(
+            image_blobs, 
+            raw_text, 
+            category,
+            actual_weight=actual_weight,
+            actual_dimensions=actual_dimensions
+        )
+        
+        if 'error' in feedback_report:
+            return jsonify({'error': feedback_report['error']}), 500
+        
+        return jsonify({
+            'message': 'Pre-upload compliance check complete (text-based)',
+            'feedback': feedback_report
+        }), 200
+        
+    except Exception as e:
+        print(f"[ERROR] Seller text upload check failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 # ==================== AI-POWERED INTENT DETECTION ====================
 
@@ -943,6 +1074,30 @@ def get_products():
     
     return jsonify({'products': products}), 200
 
+@app.route('/api/image/<int:image_id>')
+def get_image(image_id):
+    connection = get_db_connection()
+    print("route gets called")
+    cursor = connection.cursor(dictionary=True)
+    print("cursor declaration is successful")
+    
+    # Only fetch the binary data for this specific image
+    cursor.execute("SELECT image_data FROM Images WHERE image_id = %s", (image_id,))
+    result = cursor.fetchone()
+    print(f"result: {result}")
+    
+    cursor.close()
+    connection.close()
+
+    if result and result['image_data']:
+        # Convert binary data to a file-like object
+        return send_file(
+            io.BytesIO(result['image_data']),
+            mimetype='image/jpeg'  # Change to 'image/png' if your images are PNGs
+        )
+    
+    return abort(404)
+
 @app.route('/api/product/<int:product_id>', methods=['GET'])
 def get_product_detail(product_id):
     """Get detailed product information including compliance report"""
@@ -971,10 +1126,19 @@ def get_product_detail(product_id):
     if product.get('analysis_results'):
         product['compliance_report'] = json.loads(product['analysis_results'])
     
-    # Get image count
-    cursor.execute("SELECT COUNT(*) as count FROM Images WHERE product_id = %s", (product_id,))
-    image_count = cursor.fetchone()['count']
+    # NOTICE: We removed 'image_data' from this SELECT to keep it fast/light
+    cursor.execute("SELECT image_id, created_at FROM Images WHERE product_id = %s", (product_id,))
+    
+    images = cursor.fetchall()
+    image_count = len(images)
+
+    # Add the URL to each image dictionary
+    # request.host_url builds the full http://localhost:5000/... link
+    for img in images:
+        img['url'] = f"{request.host_url}api/image/{img['image_id']}"
+
     product['image_count'] = image_count
+    product['images'] = images
     
     cursor.close()
     connection.close()
@@ -1016,132 +1180,185 @@ def get_seller_activity():
 
 @app.route('/api/heatmap', methods=['GET'])
 def get_heatmap_data():
-    """Get geographic heatmap data using seller_information JSON"""
+    print("\n====== /api/heatmap (PRODUCTS ONLY) CALLED ======")
+
     if not session.get('logged_in'):
         return jsonify({'error': 'Authentication required'}), 401
 
-    user_id = session.get('user_id')
-    user_role = session.get('role')
+    user_id = session['user_id']
+    role = session['role']
 
-    connection = get_db_connection()
-    if not connection:
-        return jsonify({'error': 'Database connection failed'}), 500
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
 
-    cursor = connection.cursor(dictionary=True)
+    # ---------- QUERY FOR BOTH ROLES ----------
+    query = """
+        SELECT
+            JSON_UNQUOTE(JSON_EXTRACT(p.seller_information, '$.ai_insights.location')) AS location,
+            JSON_UNQUOTE(JSON_EXTRACT(p.seller_information, '$.name')) AS seller_name,
 
-    if user_role == 'seller':
-        # Customers scraping THIS seller's products
-        query = """
-            SELECT 
-                sa.location,
-                COUNT(*) AS scrape_count,
-                MAX(sa.timestamp) AS last_scrape,
-                COUNT(DISTINCT sa.customer_id) AS unique_customers,
-                p.title AS product_title,
-                p.asin
-            FROM (
-                SELECT 
-                    JSON_UNQUOTE(JSON_EXTRACT(seller_information, '$.ai_insights.location')) AS location,
-                    seller_id,
-                    customer_id,
-                    timestamp
-                FROM SellerActivity
-            ) AS sa
-            LEFT JOIN Products p ON p.user_id = sa.seller_id
-            WHERE sa.seller_id = %s
-              AND sa.customer_id IS NOT NULL
-              AND sa.location IS NOT NULL
-              AND sa.location != ''
-            GROUP BY sa.location, p.title, p.asin
-            ORDER BY scrape_count DESC
-        """
-        cursor.execute(query, (user_id,))
-    
-    else:
-        # Customer viewing their own scrape history
-        query = """
-            SELECT 
-                sa.location,
-                COUNT(*) AS scrape_count,
-                MAX(sa.timestamp) AS last_scrape,
-                u.username AS seller_name,
-                'customer_activity' AS activity_type
-            FROM (
-                SELECT 
-                    JSON_UNQUOTE(JSON_EXTRACT(seller_information, '$.ai_insights.location')) AS location,
-                    seller_id,
-                    customer_id,
-                    timestamp
-                FROM SellerActivity
-            ) AS sa
-            LEFT JOIN Users u ON sa.seller_id = u.id
-            WHERE sa.customer_id = %s
-              AND sa.location IS NOT NULL
-              AND sa.location != ''
-            GROUP BY sa.location, seller_name
-            ORDER BY scrape_count DESC
-        """
-        cursor.execute(query, (user_id,))
+            COUNT(*) AS total_scrapes,
 
-    heatmap_data = cursor.fetchall()
+            AVG(
+                CAST(
+                    JSON_UNQUOTE(JSON_EXTRACT(p.analysis_results, '$.compliance_score'))
+                    AS DECIMAL(5,2)
+                )
+            ) AS avg_compliance_score,
+
+            MAX(p.created_at) AS last_activity
+
+        FROM Products p
+        WHERE p.user_id = %s
+          AND JSON_EXTRACT(p.seller_information, '$.ai_insights.location') IS NOT NULL
+        GROUP BY location, seller_name
+        ORDER BY total_scrapes DESC;
+    """
+
+    print("\nExecuting SQL:\n", query)
+    cursor.execute(query, (user_id,))
+    rows = cursor.fetchall()
+
+    print(f"\nReturned {len(rows)} rows:")
+    for r in rows:
+        print(r)
 
     cursor.close()
-    connection.close()
+    conn.close()
 
     return jsonify({
-        'user_role': user_role,
-        'heatmap_data': heatmap_data,
-        'total_locations': len(heatmap_data),
-        'total_scrapes': sum(d['scrape_count'] for d in heatmap_data)
-    }), 200
+        "user_role": role,
+        "heatmap_data": rows,
+        "total_locations": len(rows),
+        "total_scrapes": sum(x['total_scrapes'] for x in rows)
+    })
+
+
+
+
 
 
 
 @app.route('/api/global-heatmap', methods=['GET'])
 def get_global_heatmap_data():
-    """Get GLOBAL heatmap using JSON seller_information"""
-    if not session.get('logged_in'):
-        return jsonify({'error': 'Authentication required'}), 401
+    print("\n====== /api/global-heatmap (PRODUCTS ONLY) CALLED ======")
 
-    connection = get_db_connection()
-    if not connection:
-        return jsonify({'error': 'Database connection failed'}), 500
-
-    cursor = connection.cursor(dictionary=True)
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
 
     query = """
-        SELECT 
-            sa.location,
+        SELECT
+            JSON_UNQUOTE(JSON_EXTRACT(p.seller_information, '$.ai_insights.location')) AS location,
+            JSON_UNQUOTE(JSON_EXTRACT(p.seller_information, '$.name')) AS seller_name,
+
             COUNT(*) AS total_scrapes,
-            COUNT(DISTINCT sa.customer_id) AS unique_customers,
-            COUNT(DISTINCT sa.seller_id) AS products_from_sellers,
-            MAX(sa.timestamp) AS last_activity
-        FROM (
-            SELECT 
-                JSON_UNQUOTE(JSON_EXTRACT(seller_information, '$.ai_insights.location')) AS location,
-                seller_id,
-                customer_id,
-                timestamp
-            FROM SellerActivity
-        ) AS sa
-        WHERE sa.location IS NOT NULL
-          AND sa.location != ''
-        GROUP BY sa.location
+
+            AVG(
+                CAST(
+                    JSON_UNQUOTE(JSON_EXTRACT(p.analysis_results, '$.compliance_score'))
+                    AS DECIMAL(5,2)
+                )
+            ) AS avg_compliance_score,
+
+            MAX(p.created_at) AS last_activity
+
+        FROM Products p
+        WHERE JSON_EXTRACT(p.seller_information, '$.ai_insights.location') IS NOT NULL
+          AND JSON_EXTRACT(p.seller_information, '$.ai_insights.location') != ''
+        GROUP BY location, seller_name
         ORDER BY total_scrapes DESC
-        LIMIT 1000
+        LIMIT 1000;
     """
 
+    print("\nExecuting SQL:\n", query)
     cursor.execute(query)
-    global_data = cursor.fetchall()
+    rows = cursor.fetchall()
+
+    print(f"\nGLOBAL returned {len(rows)} rows:")
+    for r in rows:
+        print(r)
 
     cursor.close()
-    connection.close()
+    conn.close()
 
     return jsonify({
-        'global_heatmap_data': global_data,
-        'total_locations': len(global_data),
-        'total_scrapes': sum(d['total_scrapes'] for d in global_data)
-    }), 200
+        'global_heatmap_data': rows,
+        'total_locations': len(rows),
+        'total_scrapes': sum(x['total_scrapes'] for x in rows)
+    })
+
+
+#==SEARCH PAGE EXTRACTION==
+
+@app.route('/extract-links', methods=['POST'])
+def extract_links():
+    """
+    Extract product links from Amazon search URL
+    
+    Request body:
+    {
+        "url": "https://www.amazon.in/s?k=cricket+bat",
+        "num_links": 3  // optional, defaults to 3
+    }
+    
+    Response:
+    {
+        "success": true,
+        "data": [
+            {
+                "title": "Product Title",
+                "url": "https://www.amazon.in/Product/dp/ASIN"
+            }
+        ],
+        "count": 3
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'url' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'Missing required field: url'
+            }), 400
+        
+        url = data['url']
+        num_links = data.get('num_links', 3)
+        
+        # Validate URL
+        if not url.startswith('http'):
+            return jsonify({
+                'success': False,
+                'error': 'Invalid URL format'
+            }), 400
+        
+        # Validate num_links
+        if not isinstance(num_links, int) or num_links < 1 or num_links > 20:
+            return jsonify({
+                'success': False,
+                'error': 'num_links must be an integer between 1 and 20'
+            }), 400
+        
+        # Extract links
+        results = search.extract_top_links_from_url(url, num_links)
+        
+        if not results:
+            return jsonify({
+                'success': False,
+                'error': 'No products found or failed to fetch page'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'data': results,
+            'count': len(results)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 

@@ -14,11 +14,12 @@ from mysql.connector import Error
 
 # LangChain imports
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.agents import create_sql_agent, AgentType
-from langchain.sql_database import SQLDatabase
-from langchain.agents.agent_toolkits import SQLDatabaseToolkit
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.schema import HumanMessage, SystemMessage
+
+from langchain_community.agent_toolkits import create_sql_agent
+from langchain_community.utilities import SQLDatabase
+from langchain_community.agent_toolkits import SQLDatabaseToolkit
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.messages import AIMessage
 
 # Google AI imports
@@ -28,7 +29,7 @@ from dotenv import load_dotenv
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-from langchain._api.deprecation import LangChainDeprecationWarning
+from langchain_core._api.deprecation import LangChainDeprecationWarning
 warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
 
 LOG_BUFFER = []
@@ -504,7 +505,7 @@ Return STRICT JSON format (no markdown, no code blocks):
                 "confidence_score": 0.3,
             }
 
-        log(f"[OCR] ✓ Extracted {len(ocr_results.get('extracted_text', ''))} characters")
+        log(f"[OCR] SUCCESS: Extracted {len(ocr_results.get('extracted_text', ''))} characters")
         log(f"[OCR] Found {len(ocr_results.get('findings', []))} compliance items")
         
         return {
@@ -657,10 +658,10 @@ SEARCH STRATEGIES:
 - For BIS/ISI: Look for "BIS", "ISI", "certification", "license"
 
 EXAMPLES FROM THIS PRODUCT:
-✓ "Country of origin > text: China" → Country of Origin: status="present", value="China", adequacy="adequate"
-✓ "Warranty and service > text: 1-year limited warranty" → Warranty: status="present", value="1-year limited warranty", adequacy="adequate"  
-✓ "Name and Address of Manufacturer > text: [full address]" → Manufacturer: status="present", adequacy="adequate"
-✓ "Included in the box > text: power adapter (30W)" → Power Rating: status="present", value="30W", adequacy="adequate"
+SUCCESS: "Country of origin > text: China" → Country of Origin: status="present", value="China", adequacy="adequate"
+SUCCESS: "Warranty and service > text: 1-year limited warranty" → Warranty: status="present", value="1-year limited warranty", adequacy="adequate"  
+SUCCESS: "Name and Address of Manufacturer > text: [full address]" → Manufacturer: status="present", adequacy="adequate"
+SUCCESS: "Included in the box > text: power adapter (30W)" → Power Rating: status="present", value="30W", adequacy="adequate"
 
 For each requirement:
 1. SEARCH EVERYWHERE in the data dump for related information
@@ -724,7 +725,7 @@ Return ONLY valid JSON (no markdown, no explanations):
             log(f"  • {f.get('requirement', 'Unknown')}: status={status}, adequacy={adequacy}")
             log(f"    └─ value='{value[:60]}...' from: {found_in[:50]}")
 
-        log(f"[DATA ANALYSIS] ✓ Complete. Quality Score: {analysis_results.get('data_quality_score', 0.5)}")
+        log(f"[DATA ANALYSIS] SUCCESS: Complete. Quality Score: {analysis_results.get('data_quality_score', 0.5)}")
         return analysis_results
 
     except Exception as e:
@@ -1002,7 +1003,7 @@ def calculate_compliance_score(
     minor_violations = [v for v in violations if v["severity"] == "minor"]
 
     log(
-        f"[SCORING] ✓ Final Score: {total_score:.1f}/100 | Grade: {grade}. "
+        f"[SCORING] SUCCESS: Final Score: {total_score:.1f}/100 | Grade: {grade}. "
         f"Critical: {len(critical_violations)}, "
         f"Major: {len(major_violations)}, Minor: {len(minor_violations)}"
     )
@@ -1046,7 +1047,7 @@ def generate_recommendations(violations: List[Dict], ocr_results: Dict, data_ana
     
     # Major improvements
     if major_missing:
-        recommendations.append("\n⚠️  IMPORTANT IMPROVEMENTS:")
+        recommendations.append("\nWARNING:️  IMPORTANT IMPROVEMENTS:")
         for v in major_missing:
             recommendations.append(f"   • Include: {v.get('requirement', 'Unknown')}")
     
@@ -1068,7 +1069,7 @@ def generate_recommendations(violations: List[Dict], ocr_results: Dict, data_ana
         recommendations.append("   • Upload clear photos of product labels")
         recommendations.append("   • Include front, back, and side label images")
     
-    return recommendations if recommendations else ["✓ Product meets basic compliance requirements"]
+    return recommendations if recommendations else ["SUCCESS: Product meets basic compliance requirements"]
 
 # ==================== MAIN COMPLIANCE ANALYSIS FUNCTION ====================
 
@@ -1291,7 +1292,7 @@ def analyze_seller_upload(images: List[bytes], product_data: Dict[str, Any], cat
             'estimated_approval_chance': 'High' if scoring['score'] >= 85 else 'Medium' if scoring['score'] >= 70 else 'Low'
         }
         
-        print(f"[SELLER UPLOAD CHECK] ✓ Score: {scoring['score']}/100 | Grade: {scoring['grade']}")
+        print(f"[SELLER UPLOAD CHECK] SUCCESS: Score: {scoring['score']}/100 | Grade: {scoring['grade']}")
         print(f"[SELLER UPLOAD CHECK] Ready for upload: {feedback_report['ready_for_upload']}")
         
         return feedback_report
@@ -1357,7 +1358,7 @@ When querying:
         agent = create_sql_agent(
             llm=llm,
             toolkit=toolkit,
-            agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            agent_type="zero-shot-react-description",
             verbose=True,
             handle_parsing_errors=True,
             max_iterations=5,
@@ -1418,7 +1419,7 @@ def chatbot_agent(user_message: str, conversation_history: List[Dict] = None) ->
         
         response_text = result.get('output', 'I apologize, but I encountered an issue processing your request.')
         
-        print(f"[CHATBOT] ✓ Response generated ({len(response_text)} chars)")
+        print(f"[CHATBOT] SUCCESS: Response generated ({len(response_text)} chars)")
         
         return response_text
         
@@ -1468,7 +1469,7 @@ def batch_analyze_products(product_ids: List[int]) -> Dict[str, Any]:
         summary['average_score'] /= summary['analyzed']
         summary['average_score'] = round(summary['average_score'], 1)
     
-    print(f"[BATCH] ✓ Complete. Analyzed: {summary['analyzed']}, Failed: {summary['failed']}")
+    print(f"[BATCH] SUCCESS: Complete. Analyzed: {summary['analyzed']}, Failed: {summary['failed']}")
     
     return {
         'summary': summary,

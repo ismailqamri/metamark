@@ -10,9 +10,6 @@ Generalized Amazon product scraper with extra support for Book layouts.
   availability, shipping_details.
 """
 
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 import json
 import re
@@ -20,6 +17,13 @@ from urllib.parse import urlparse
 from typing import Optional, Dict, Any, List
 import google.generativeai as genai
 import os
+
+# Shared hardened page fetcher (UA rotation, cookie priming, retries,
+# bot-wall detection, and an optional headless-browser fallback).
+try:
+    from amazon_scraper.fetcher import get_fetcher
+except ImportError:  # allow running this file directly from amazon_scraper/
+    from fetcher import get_fetcher
 
 # === Gemini (google.generativeai) setup (OPTION A) ===
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or "AIzaSyCRdKzY4bBefy0w3n_WUPC4uset4hED6hk"
@@ -54,13 +58,8 @@ class AmazonScraper:
     def __init__(self, headers: Dict[str, str] = None, timeout: int = 15):
         self.headers = headers or DEFAULT_HEADERS
         self.timeout = timeout
-
-        self.session = requests.Session()
-        retries = Retry(total=3, backoff_factor=0.6,
-                        status_forcelist=[429, 500, 502, 503, 504],
-                        allowed_methods=["GET", "HEAD", "GET"])
-        self.session.mount('https://', HTTPAdapter(max_retries=retries))
-        self.session.mount('http://', HTTPAdapter(max_retries=retries))
+        # All HTTP fetching is delegated to the shared, hardened fetcher.
+        self.fetcher = get_fetcher()
 
     def extract_asin(self, url: str, soup: Optional[BeautifulSoup] = None) -> Optional[str]:
         """Extract ASIN from common places."""
@@ -224,9 +223,11 @@ class AmazonScraper:
 
     def scrape_product(self, url: str) -> Optional[Dict[str, Any]]:
         try:
-            r = self.session.get(url, headers=self.headers, timeout=self.timeout)
-            r.raise_for_status()
-            soup = BeautifulSoup(r.content, 'html.parser')
+            html = self.fetcher.fetch(url)
+            if not html:
+                print(f"[ERROR] Could not retrieve page (blocked or unreachable): {url}")
+                return None
+            soup = BeautifulSoup(html, 'html.parser')
 
             product = {
                 'url': url,
@@ -266,9 +267,6 @@ class AmazonScraper:
             product["seller"] = seller_info
 
             return product
-        except requests.exceptions.RequestException as e:
-            print(f"[ERROR] Request failed: {e}")
-            return None
         except Exception as e:
             print(f"[ERROR] Error parsing product: {e}")
             return None

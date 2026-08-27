@@ -10,8 +10,19 @@ except ImportError:
     print("BeautifulSoup4 not installed. Install it with: pip install beautifulsoup4")
     exit(1)
 
+# Prefer the shared hardened fetcher (UA rotation, cookie priming, retries,
+# bot-wall detection, headless-browser fallback). Falls back to the local
+# helpers below if the module can't be imported (e.g. run in isolation).
+try:
+    from amazon_scraper.fetcher import fetch as _shared_fetch
+except ImportError:
+    try:
+        from fetcher import fetch as _shared_fetch
+    except ImportError:
+        _shared_fetch = None
+
 DEFAULT_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.5',
     'Accept-Encoding': 'gzip, deflate, br',
@@ -190,20 +201,32 @@ def fetch_with_requests(url):
         return None
 
 def fetch_amazon_page(url, use_selenium=False):
-    """Fetch Amazon search page HTML"""
+    """Fetch Amazon search page HTML.
+
+    By default this delegates to the shared hardened fetcher (rotating UA,
+    cookie priming, retries with backoff, bot-wall detection and a headless
+    browser fallback). Setting ``use_selenium=True`` forces the Selenium path
+    directly. If the shared fetcher module is unavailable, we fall back to the
+    legacy requests-then-Selenium behaviour.
+    """
     if use_selenium:
         return fetch_with_selenium(url)
-    else:
-        # Try requests first
-        print("Trying with requests library...")
-        html = fetch_with_requests(url)
-        
-        if html and len(html) > 1000:  # Basic check that we got content
+
+    # Preferred path: shared hardened fetcher.
+    if _shared_fetch is not None:
+        html = _shared_fetch(url)
+        if html and len(html) > 1000:
             return html
-        
-        # Fallback to Selenium
-        print("\nRequests failed or was blocked. Trying Selenium...")
+        print("\nShared fetcher was blocked or returned too little; trying Selenium...")
         return fetch_with_selenium(url)
+
+    # Legacy fallback if the shared fetcher couldn't be imported.
+    print("Trying with requests library...")
+    html = fetch_with_requests(url)
+    if html and len(html) > 1000:  # Basic check that we got content
+        return html
+    print("\nRequests failed or was blocked. Trying Selenium...")
+    return fetch_with_selenium(url)
 
 def extract_top_links_from_url(search_url, num_links=3, use_selenium=False):
     """Extract top N product links from Amazon search URL"""

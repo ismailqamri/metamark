@@ -95,10 +95,10 @@ def ai_router(url: str) -> dict:
             print(f"[AI ROUTER] Invalid category '{category}', using default 'amazon'")
             category = 'amazon'
         else:
-            print(f"[AI ROUTER] ✓ Detected category: {category}")
+            print(f"[AI ROUTER] SUCCESS: Detected category: {category}")
         
     except Exception as e:
-        print(f"[AI ROUTER] ⚠ AI analysis failed: {e}")
+        print(f"[AI ROUTER] WARNING: AI analysis failed: {e}")
         print(f"[AI ROUTER] Using URL-based heuristics as fallback...")
         
         # Fallback: Simple URL/keyword analysis

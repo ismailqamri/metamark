@@ -1,8 +1,43 @@
+# ============================================================
+# Legal Metrology Compliance Backend — Python dependencies
+# Pinned to the versions verified working in this project's venv.
+# Install with:  pip install -r requirements.txt
+# ============================================================
+
+# ---- Web framework & CORS ----
 Flask==3.0.0
 flask-cors==4.0.0
+
+# ---- Database ----
 mysql-connector-python==8.2.0
-requests==2.31.0
+SQLAlchemy==2.0.52          # required by langchain_community SQLDatabase
+
+# ---- HTTP & scraping ----
+requests==2.34.2
+urllib3>=2.0,<3
 beautifulsoup4==4.12.2
+lxml==6.1.2
+
+# ---- Google Gemini + LangChain (used by the compliance modules) ----
 google-generativeai==0.3.2
-urllib3==2.1.0
-lxml==4.9.3
+langchain==1.3.17
+langchain-core==1.6.0
+langchain-community==0.4.2
+langchain-google-genai==4.3.6
+langchain-text-splitters==1.1.2
+
+# ---- Utilities ----
+python-dotenv==1.2.3
+numpy==2.5.2
+
+# ============================================================
+# OPTIONAL — scraping hardening (see amazon_scraper/fetcher.py)
+# The code degrades gracefully if these are absent, but installing
+# them improves reliability against Amazon's anti-bot measures.
+# ------------------------------------------------------------
+# Brotli decoding: lets the scraper accept 'br'-compressed responses.
+brotli>=1.1.0
+# Headless-browser fallback (enable with SCRAPER_BROWSER_FALLBACK=1):
+# selenium>=4.20.0
+# undetected-chromedriver>=3.5.5
+# ============================================================

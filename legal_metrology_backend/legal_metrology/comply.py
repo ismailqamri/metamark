@@ -17,11 +17,12 @@ from mysql.connector import Error
 
 # LangChain imports
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.agents import create_sql_agent, AgentType
-from langchain.sql_database import SQLDatabase
-from langchain.agents.agent_toolkits import SQLDatabaseToolkit
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.schema import HumanMessage, SystemMessage
+
+from langchain_community.agent_toolkits import create_sql_agent
+from langchain_community.utilities import SQLDatabase
+from langchain_community.agent_toolkits import SQLDatabaseToolkit
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.messages import AIMessage
 
 # Google AI imports
@@ -654,7 +655,7 @@ Be thorough and precise. This analysis will be used for Legal Metrology complian
                 qr_link = url_match.group(1).strip()
         # --------------------------------
 
-        print(f"[OCR] ✓ Analysis complete. Confidence: {ocr_results.get('confidence_score', 0.5)}")
+        print(f"[OCR] SUCCESS: Analysis complete. Confidence: {ocr_results.get('confidence_score', 0.5)}")
         
         return {
             'extracted_text': ocr_results.get('extracted_text', ''),
@@ -813,7 +814,7 @@ Return your analysis in JSON format:
                 'recommendations': ['Ensure product description contains all Legal Metrology required information']
             }
         
-        print(f"[DATA ANALYSIS] ✓ Complete. Quality Score: {analysis_results.get('data_quality_score', 0.5)}")
+        print(f"[DATA ANALYSIS] SUCCESS: Complete. Quality Score: {analysis_results.get('data_quality_score', 0.5)}")
         
         return analysis_results
         
@@ -972,7 +973,7 @@ def calculate_compliance_score(ocr_results: Dict, data_analysis: Dict, category:
     major_violations = [v for v in violations if v['severity'] == 'major']
     minor_violations = [v for v in violations if v['severity'] == 'minor']
     
-    print(f"[SCORING] ✓ Final Score: {total_score:.1f}/100 | Grade: {grade}")
+    print(f"[SCORING] SUCCESS: Final Score: {total_score:.1f}/100 | Grade: {grade}")
     print(f"[SCORING] Violations - Critical: {len(critical_violations)}, Major: {len(major_violations)}, Minor: {len(minor_violations)}")
     
     return {
@@ -1044,7 +1045,7 @@ def generate_recommendations(violations: List[Dict], ocr_results: Dict, data_ana
 
     # Major improvements
     if major_missing:
-        recommendations.append("\n⚠ IMPORTANT IMPROVEMENTS REQUIRED:")
+        recommendations.append("\nWARNING: IMPORTANT IMPROVEMENTS REQUIRED:")
         for v in major_missing:
             recommendations.append(f" • Add: {v['requirement']}")
 
@@ -1073,7 +1074,7 @@ def generate_recommendations(violations: List[Dict], ocr_results: Dict, data_ana
     recommendations.append(" • MRP cannot be exceeded (Rule 18)")
     recommendations.append(" • Only metric units allowed (Rule 13)")
 
-    return recommendations if recommendations else ["✓ No major compliance issues found."]
+    return recommendations if recommendations else ["SUCCESS: No major compliance issues found."]
 
 
 # ==================== MAIN COMPLIANCE ANALYSIS FUNCTION ====================
@@ -1312,7 +1313,7 @@ def create_db_agent():
         agent = create_sql_agent(
             llm=llm,
             toolkit=toolkit,
-            agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            agent_type="zero-shot-react-description",
             verbose=True,
             handle_parsing_errors=True,
             max_iterations=5,

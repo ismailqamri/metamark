@@ -6,11 +6,14 @@
 # --- env ---
 .env
 .env.*
+!.env.example
 # python cache + venv
 __pycache__/
 *.pyc
 myenv/
 venv/
+# VS Code "Run Selected Code" scratch file
+tempCodeRunnerFile.py
 
 # node
 node_modules/
