@@ -156,7 +156,7 @@ def hash_password(password: str) -> str:
 
 def extract_asin_from_url(url: str) -> str:
     """Extract ASIN from Amazon URL"""
-    match = re.search(r'/(?:dp|gp/product)/([A-Z0-9]{9,13})', url)
+    match = re.search(r'/(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{9,13})', url, re.IGNORECASE)
     return match.group(1) if match else None
 
 def download_image(image_url: str) -> bytes:
@@ -1957,4 +1957,4 @@ if __name__ == '__main__':
     print("       - analyze_compliance(product_id)")
     print("       - analyze_seller_upload(images, data, category)")
     print("       - chatbot_agent(message)")
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5001)
