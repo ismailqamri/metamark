@@ -12,6 +12,7 @@ __pycache__/
 *.pyc
 myenv/
 venv/
+.venv/
 # VS Code "Run Selected Code" scratch file
 tempCodeRunnerFile.py
 
