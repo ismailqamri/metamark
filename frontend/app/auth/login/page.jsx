@@ -11,7 +11,7 @@ const poppins = Poppins({
   subsets: ["latin"],
 });
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
 
 export default function LoginPage() {
   const router = useRouter();
