@@ -130,13 +130,27 @@ export default function Chatbot() {
         throw new Error(data.error || "Failed to get response")
       }
 
-      const assistantMessage = {
-        role: "assistant",
-        content: data.message,
-        intent: data.intent,
-        user_context: data.user_context,
-        timestamp: data.timestamp,
-      }
+      const assistantContent =
+  typeof data.message === "string"
+    ? data.message
+    : Array.isArray(data.message)
+      ? data.message
+          .map((item) => {
+            if (typeof item === "string") return item
+            if (item?.text) return item.text
+            return ""
+          })
+          .filter(Boolean)
+          .join("")
+      : data.message?.text || JSON.stringify(data.message)
+
+const assistantMessage = {
+  role: "assistant",
+  content: assistantContent,
+  intent: data.intent,
+  user_context: data.user_context,
+  timestamp: data.timestamp,
+}
 
       setMessages((prev) => [...prev, assistantMessage])
     } catch (error) {
@@ -301,7 +315,11 @@ export default function Chatbot() {
                         <div
                           className={`text-sm sm:text-base ${poppins.className} whitespace-pre-wrap break-words`}
                           dangerouslySetInnerHTML={{
-                            __html: message.content
+                            __html: (
+                              typeof message.content === "string"
+                                ? message.content
+                                : JSON.stringify(message.content, null, 2)
+                            )
                               .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-white">$1</strong>')
                               .replace(/\n/g, "<br/>")
                               .replace(/•/g, '<span class="text-cyan-400">•</span>'),
