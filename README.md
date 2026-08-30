@@ -4,8 +4,8 @@
 
 ## AI-Driven Automated Legal Metrology Compliance Checker
 
-**Smart India Hackathon 2025 – Winning Solution**
-**Team Code Nirvana**
+**Smart India Hackathon 2026**
+**Team Code De Bug**
 
 ---
 
