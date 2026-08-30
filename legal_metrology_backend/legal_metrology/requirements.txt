@@ -28,7 +28,7 @@ langchain-text-splitters==1.1.2
 
 # ---- Utilities ----
 python-dotenv==1.2.3
-numpy==2.5.2
+numpy==2.4.6
 
 # ============================================================
 # OPTIONAL — scraping hardening (see amazon_scraper/fetcher.py)
