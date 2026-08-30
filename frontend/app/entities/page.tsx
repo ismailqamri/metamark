@@ -29,7 +29,6 @@ import {
 } from 'lucide-react';
 import {
   GoogleMap,
-  HeatmapLayer,
   useJsApiLoader,
   Marker,
   InfoWindow,
@@ -188,7 +187,7 @@ export default function HeatmapPage() {
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
-    libraries: ['visualization', 'marker'],
+    libraries: ['marker'],
   });
 
   // Close suggestions when clicking outside
@@ -1115,22 +1114,7 @@ export default function HeatmapPage() {
                   fullscreenControl: true,
                 }}
               >
-                {showHeatmap && mapHeatmapData.length > 0 && (
-                  <HeatmapLayer
-                    data={mapHeatmapData}
-                    options={{
-                      radius: 45,
-                      opacity: 0.6,
-                      gradient: [
-                        'rgba(0,255,0,0)',
-                        'rgba(34,197,94,0.5)',
-                        'rgba(234,179,8,0.9)',
-                        'rgba(249,115,22,1)',
-                        'rgba(239,68,68,1)',
-                      ],
-                    }}
-                  />
-                )}
+                
 
                 {markers.map((marker: any, idx: number) => (
                   <Marker
